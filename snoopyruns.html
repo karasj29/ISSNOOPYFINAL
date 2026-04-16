@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { background: #f0f0f0; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }
+  #gameCanvas { display: block; border-radius: 12px; cursor: pointer; background: #87CEEB; box-shadow: 0 10px 30px rgba(0,0,0,0.15); }
+  #gameContainer { position: relative; width: 700px; height: 220px; }
+  #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); border-radius: 12px; transition: all 0.3s; z-index: 10; }
+  #overlay h2 { color: #fff; font-size: 32px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 2px; }
+  #overlay p { color: #fff; font-size: 14px; margin: 0 0 20px; opacity: 0.9; }
+  .obtn { background: #e74c3c; color: #fff; border: none; padding: 12px 30px; border-radius: 50px; font-size: 18px; font-weight: bold; cursor: pointer; transition: transform 0.2s; box-shadow: 0 4px 0 #c0392b; }
+  .obtn:hover { transform: scale(1.05); background: #ff5e4d; }
+  .obtn:active { transform: translateY(2px); box-shadow: 0 2px 0 #c0392b; }
+  #speedMsg { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: #f1c40f; color: #000; padding: 6px 15px; border-radius: 20px; font-weight: bold; display: none; pointer-events: none; animation: bounce 0.5s infinite alternate; z-index: 5; }
+  @keyframes bounce { from { transform: translateX(-50%) translateY(0); } to { transform: translateX(-50%) translateY(-5px); } }
+</style>
+</head>
+<body>
+
+<div id="gameContainer">
+  <canvas id="gameCanvas" width="700" height="220"></canvas>
+  <div id="overlay">
+    <h2>Snoopy Runner</h2>
+    <p>Press Space to Jump</p>
+    <button class="obtn" id="startBtn">START GAME</button>
+  </div>
+  <div id="speedMsg">Speed Boost! Thanks Woodstock!</div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const speedMsg = document.getElementById('speedMsg');
+
+const W = canvas.width, H = canvas.height;
+const GROUND = H - 35;
+let state = 'idle', score = 0, hiScore = 0, speed = 4.5, frameCount = 0, speedMsgTimer = 0, animFrame;
+let obstacles = [], woodstocks = [], clouds = [{x:150,y:40,w:60},{x:400,y:25,w:50},{x:600,y:50,w:70}];
+
+// Random spawn logic variables
+let nextObstacleDist = 0; 
+
+const snoopy = { x:80, y:GROUND-50, w:45, h:50, vy:0, onGround:true, legFrame:0, legTimer:0 };
+
+function reset() {
+  score=0; speed=4.5; frameCount=0;
+  snoopy.y=GROUND-50; snoopy.vy=0; snoopy.onGround=true;
+  obstacles=[]; woodstocks=[];
+  setNextObstacleDist();
+}
+
+function setNextObstacleDist() {
+  // Randomizes the gap between doghouses significantly (between 300 and 800 pixels)
+  nextObstacleDist = 300 + Math.random() * 500;
+}
+
+function drawSnoopy(x, y, jumping) {
+  ctx.save();
+  const bx = x, by = y;
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(bx+5, by+35); ctx.quadraticCurveTo(bx-5, by+30, bx, by+22); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+  const legOff = snoopy.legFrame * 4;
+  ctx.beginPath(); ctx.ellipse(bx+12 + (jumping?0:legOff), by+48, 10, 5, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(bx+28 - (jumping?0:legOff), by+48, 10, 5, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(bx+20, by+32, 14, 18, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.ellipse(bx+12, by+30, 5, 8, 0.4, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#e74c3c'; 
+  ctx.fillRect(bx+14, by+16, 12, 3);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.moveTo(bx+10, by+10);
+  ctx.bezierCurveTo(bx+10, by-10, bx+45, by-10, bx+45, by+10);
+  ctx.bezierCurveTo(bx+45, by+25, bx+15, by+25, bx+10, by+10);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.moveTo(bx+15, by+5);
+  ctx.bezierCurveTo(bx+5, by+5, bx+5, by+25, bx+15, by+25);
+  ctx.bezierCurveTo(bx+20, by+25, bx+20, by+5, bx+15, by+5);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.arc(bx+28, by+8, 2, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(bx+44, by+12, 4, 3, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawWoodstock(x, y) {
+  ctx.save();
+  ctx.fillStyle = '#f1c40f'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x+5, y); ctx.lineTo(x+2, y-8);
+  ctx.moveTo(x+8, y); ctx.lineTo(x+8, y-10);
+  ctx.moveTo(x+11, y); ctx.lineTo(x+14, y-8);
+  ctx.stroke();
+  ctx.beginPath(); ctx.arc(x+8, y+5, 7, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#f39c12';
+  ctx.beginPath(); ctx.moveTo(x+14, y+4); ctx.lineTo(x+20, y+7); ctx.lineTo(x+14, y+10); ctx.fill();
+  ctx.fillStyle = '#f1c40f';
+  ctx.beginPath(); ctx.ellipse(x+8, y+15, 6, 8, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  const flap = Math.sin(Date.now() / 50) * 5;
+  ctx.beginPath(); ctx.moveTo(x+2, y+12); ctx.lineTo(x-5, y+12+flap); ctx.stroke();
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.arc(x+10, y+4, 1.2, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawDoghouse(o) {
+  const {x, y, scale} = o;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.1)';
+  ctx.beginPath(); ctx.ellipse(x + (30 * scale), y + (65 * scale), 35 * scale, 8 * scale, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#e74c3c'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2 * scale;
+  const plankHeight = 10 * scale;
+  for (let i = 0; i < 4; i++) {
+    ctx.fillRect(x + (5 * scale), y + (25 * scale) + (i * plankHeight), 50 * scale, plankHeight);
+    ctx.strokeRect(x + (5 * scale), y + (25 * scale) + (i * plankHeight), 50 * scale, plankHeight);
+  }
+  ctx.beginPath();
+  ctx.moveTo(x - (10 * scale), y + (25 * scale)); 
+  ctx.lineTo(x + (30 * scale), y); 
+  ctx.lineTo(x + (70 * scale), y + (25 * scale)); 
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x - (3 * scale), y + (18 * scale)); ctx.lineTo(x + (30 * scale), y + (6 * scale)); ctx.lineTo(x + (63 * scale), y + (18 * scale));
+  ctx.stroke();
+  ctx.fillStyle = '#2c3e50';
+  ctx.beginPath();
+  ctx.arc(x + (30 * scale), y + (40 * scale), 12 * scale, Math.PI, 0);
+  ctx.lineTo(x + (42 * scale), y + (65 * scale)); ctx.lineTo(x + (18 * scale), y + (65 * scale));
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function gameLoop() {
+  if (state !== 'playing') return;
+  frameCount++; score++;
+  if (frameCount % 1000 === 0) speed += 0.4;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#87CEEB'; ctx.fillRect(0,0,W,H);
+  
+  clouds.forEach(c => {
+    c.x -= speed * 0.3; if(c.x < -100) c.x = W + 50;
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(c.x, c.y, c.w, c.w*0.5, 0, 0, Math.PI*2); ctx.fill();
+  });
+
+  ctx.fillStyle = '#2ecc71'; ctx.fillRect(0, GROUND, W, H - GROUND);
+  ctx.fillStyle = '#27ae60'; ctx.fillRect(0, GROUND, W, 5);
+
+  snoopy.vy += 0.65; snoopy.y += snoopy.vy;
+  if (snoopy.y >= GROUND - 50) { snoopy.y = GROUND - 50; snoopy.vy = 0; snoopy.onGround = true; }
+  snoopy.legTimer++; if(snoopy.legTimer > 8) { snoopy.legFrame = 1 - snoopy.legFrame; snoopy.legTimer = 0; }
+
+  // RANDOMIZED SPAWNING
+  const lastObs = obstacles[obstacles.length - 1];
+  if (!lastObs || (W - lastObs.x > nextObstacleDist)) {
+      const randomScale = 0.8 + Math.random() * 0.45; 
+      obstacles.push({
+        x: W, 
+        y: GROUND - (65 * randomScale), 
+        w: 60 * randomScale, 
+        h: 65 * randomScale, 
+        scale: randomScale
+      });
+      setNextObstacleDist(); // Pick a new random gap for the NEXT house
+  }
+
+  obstacles.forEach((o, i) => {
+    o.x -= speed; drawDoghouse(o);
+    if (rectOverlap(snoopy.x+12, snoopy.y+8, 22, 38, o.x+(5*o.scale), o.y+(5*o.scale), o.w-10, o.h-5)) gameOver();
+  });
+  obstacles = obstacles.filter(o => o.x > -100);
+
+  if (frameCount % 240 === 0) woodstocks.push({x: W, y: 30 + Math.random()*80, w: 20, h: 20});
+  woodstocks.forEach((w, i) => {
+    w.x -= speed * 1.3; drawWoodstock(w.x, w.y);
+    if (rectOverlap(snoopy.x, snoopy.y, 40, 40, w.x, w.y, 20, 20)) {
+      speed += 0.7; speedMsgTimer = 60; woodstocks.splice(i, 1);
+    }
+  });
+  woodstocks = woodstocks.filter(w => w.x > -50);
+
+  if (speedMsgTimer > 0) { speedMsgTimer--; speedMsg.style.display = 'block'; } else { speedMsg.style.display = 'none'; }
+
+  drawSnoopy(snoopy.x, snoopy.y, !snoopy.onGround);
+
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial';
+  ctx.fillText(`Score: ${Math.floor(score/10)}`, 20, 30);
+  ctx.fillText(`Hi-Score: ${Math.floor(hiScore/10)}`, W - 130, 30);
+
+  animFrame = requestAnimationFrame(gameLoop);
+}
+
+function rectOverlap(ax,ay,aw,ah,bx,by,bw,bh) { return ax<bx+bw && ax+aw>bx && ay<by+bh && ay+ah>by; }
+
+function gameOver() {
+  state = 'over'; if(score > hiScore) hiScore = score;
+  overlay.innerHTML = `<h2>End of Game</h2><p>Score: ${Math.floor(score/10)}</p><button class="obtn" id="restartBtn">START OVER</button>`;
+  overlay.style.display = 'flex';
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+}
+
+function startGame() {
+  reset(); overlay.style.display = 'none'; state = 'playing';
+  cancelAnimationFrame(animFrame); gameLoop();
+}
+
+document.addEventListener('keydown', e => { if (e.code==='Space') { e.preventDefault(); if(state==='playing') { if(snoopy.onGround) snoopy.vy=-13.5; snoopy.onGround=false; } else if(state==='idle' || state==='over') startGame(); } });
+canvas.addEventListener('mousedown', () => { if(state==='playing') { if(snoopy.onGround) snoopy.vy=-13.5; snoopy.onGround=false; } else if(state==='idle') startGame(); });
+document.getElementById('startBtn').addEventListener('click', startGame);
+</script>
+</body>
+</html>
